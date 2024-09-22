@@ -14,14 +14,19 @@ The flow is as follows:
 - We can query the final dataset from the staging **S3** bucket via **Athena**, or to expose it for API GET requests via an **AWS API Gateway**, thanks to the *lambda_query_athena* function that operates as the backend of API Gateway. 
 - We also send out notifications via **SNS** when a new file lands in the landing S3 bucket, and if a new BTC price is detected above a certain threshold. This is managed by the *lambda_triggering_sns* function.
 
-The **Glue ETL** script runs on *Spark*. It loads data from the source bucket, and adds new `partition columns` extracting the `year`, `month`, `day`, and `hour` from the timestamp_utc column. It also adds a date column by converting the first 10 characters of the timestamp_utc into a *date format*, creates a column with proper *timestamp format* and does *casting*. Then it writes the new dataframe to the destination bucket, in *Parquet* format, and partitioned by crypto type, year, month, day, and hour, improving this way the query performance and storage efficiency. The *enableUpdateCatalog=True* option ensures that the Glue Data Catalog is updated with the new partitions, so Athena can pick them up in future queries. The job is committed with `job.commit()` to indicate that all processing steps have been completed successfully. Note that by configuring the *job-bookmarks* as *Enabled*, we allow incremental processing. This ensures that the job only processes new or updated data since the last run. 
+
+The **Glue ETL** script runs on *Spark*. It loads data from the source bucket, and adds new `partition columns` extracting the `year`, `month`, `day`, and `hour` from the timestamp_utc column. It also adds a date column by converting the first 10 characters of the timestamp_utc into a *date format*, creates a column with proper *timestamp format* and does *casting*. Then it writes the new dataframe to the destination bucket, in *Parquet* format, and partitioned by crypto type, year, month, day, and hour, improving this way the query performance and storage efficiency. 
+
+The *enableUpdateCatalog=True* option ensures that the Glue Data Catalog is updated with the new partitions, so Athena can pick them up in future queries. The job is committed with `job.commit()` to indicate that all processing steps have been completed successfully. Note that by configuring the *job-bookmarks* as *Enabled*, we allow incremental processing. This ensures that the job only processes new or updated data since the last run. 
+
 
 In terms of the **Simple Notification Service (SNS)**, we create:
 - an *SNS topic*, which is a channel to which messages can be published. 
 - a *subscription* for sending email notifications, that will notify a specific endpoint (an email address, in this case) when a message is published to the SNS topic. 
 Then, we can add our email as endpoint, either in the Terraform file, or by using the AWS UI. AWS SNS will send a confirmation email to the email address we provided. We need to confirm the subscription by clicking on the link in that email, in order to start receiving notifications.
 
-Tha **API Gateway** defines a REST API, with an endpoint URL that users can call, via the GET method. Our definition in the Terraform file ensures that an API key must be included in the request. The API Gateway is connected to a backend AWS Lambda function, *query_athena_currencies*. The API Gateway will proxy the incoming GET requests to the Lambda function using the HTTP POST method. There is also a usage plan defined for the ones using the API key, that controls the rate limits and quotas (throttle settings: rate_limit, burst_limit).
+
+The **API Gateway** defines a REST API, with an endpoint URL that users can call, via the GET method. Our definition in the Terraform file ensures that an API key must be included in the request. The API Gateway is connected to a backend AWS Lambda function, *query_athena_currencies*. The API Gateway will proxy the incoming GET requests to the Lambda function using the HTTP POST method. There is also a usage plan defined for the ones using the API key, that controls the rate limits and quotas (throttle settings: rate_limit, burst_limit).
 
 
 ## SAM CLI
@@ -39,6 +44,7 @@ sam init
 ```
 After selecting your template to use, runtime, and project name, you get a folder structure in your SAM project, similar to this:
 
+```
 my-sam-app/
 ├── coinbase_api_call/
 │   ├── app.py              # Lambda function code
@@ -49,6 +55,7 @@ my-sam-app/
 └── tests/                  # Test cases
     ├── unit/
     └── integration/
+```
 
 Modify the `coinbase_api_call/app.py` file to write your Lambda logic.
 
@@ -127,7 +134,7 @@ Specifically for the `coinbase_api_call`, which has several dependencies: We can
 Then, the folder that contains the lambda code (`src_coinbase_lambda` directory) is zipped together with the installed dependencies. Note: We have splitted the functionalities of reading a secret from the AWS Secret Manager, as well as writing data to Kinesis Data Stream, in separate functions/files under the same folder. These files are also zipped together in this process. The zip file will be used to deploy the lambda function to AWS. See `"aws_lambda_function" "coinbase_request"` resource for that. This part (zipping and deploying) is applied also for the other lambda functions.
 
 
-The Terraform code for Glue points to the python script that we use for the transformations (`ETL_script.py`). This script is located relative to the current Terraform module, and it will be uploaded to an S3 bucket to be used by the Glue job. The Glue job depends on the successful upload of the ETL script, ensuring the script is in the S3 bucket before the job starts. Access logging is enabled in Terraform for the staging bucket, with logs being sent to another bucket.
+The Terraform code for `Glue` points to the python script that we use for the transformations (`ETL_script.py`). This script is located relative to the current Terraform module, and it will be uploaded to an S3 bucket to be used by the Glue job. The Glue job depends on the successful upload of the ETL script, ensuring the script is in the S3 bucket before the job starts. Access logging is enabled in Terraform for the staging bucket, with logs being sent to another bucket.
 
 This Terraform code doesn't explicitly mention the IAM policy that grants the AWS Glue job access to read from and write to the S3 buckets involved in the ETL process. The IAM permissions can be handled through the IAM Role that is attached to the Glue job. A policy should be attached to the role, granting:
 - Read access to the source S3 bucket (e.g., `GetObject, ListBucket`).
@@ -153,7 +160,9 @@ For example, the *api_gateway* module could handle all resources related to sett
 
 ### How to run
 
-As a prerequisite, Terraform needs a **state**. In the provider.tf file, we can see that the Terraform state is configured to be stored *remotely in an S3 bucket*, different for dev and prod. You need to make sure that the bucket exists in your region. If it doesn't exist, create it via the AWS Management Console or CLI:
+As a prerequisite, Terraform needs a **state**. 
+
+In the provider.tf file, we can see that the Terraform state is configured to be stored *remotely in an S3 bucket*, different for dev and prod. You need to make sure that the bucket exists in your region. If it doesn't exist, create it via the AWS Management Console or CLI:
 ```bash
 aws s3 mb s3://[bucketname] --region [regionname]
 ```
@@ -184,6 +193,7 @@ The AWS user or role that is running Terraform needs proper permissions to acces
 Then, to run the Terraform code **manually** in both environments, follow these steps:
 
 1. Navigate to the Environment Directory:
+
 For development:
 ```bash
 cd environments/dev
@@ -194,13 +204,16 @@ cd environments/prod
 ```
 
 2. Initialize Terraform:
+
 This command sets up the Terraform environment, downloading necessary providers, and setting up the S3 backend for storing state remotely.
+
 Terraform will prompt you to confirm if you'd like to migrate any existing local state to the new remote S3 backend (if a local state exists).
 ```bash
 terraform init
 ```
 
 3. Plan the Deployment:
+
 This command generates an execution plan, allowing you to review what Terraform will change:
 ```bash
 terraform plan
@@ -211,6 +224,7 @@ terraform plan -var-file=terraform.tfvars
 ```
 
 4. Apply the Changes:
+
 This command creates or updates the resources defined in your Terraform files:
 ```bash
 terraform apply
@@ -222,6 +236,7 @@ terraform apply -var-file=terraform.tfvars
 ```
 
 5. Repeat for Production:
+
 Follow the same steps in the prod directory to apply your production configurations.
 
 
@@ -229,6 +244,7 @@ Follow the same steps in the prod directory to apply your production configurati
 Instead of doing manually all those steps, I created a `GitHub Actions CI/CD pipeline` that automates the deployment of the Terraform infrastructure to both development and production environments. 
 
 The workflow can be triggered manually from the GitHub Actions tab (`workflow_dispatch`), allowing for flexible deployments.
+
 It consists of two main jobs: `DeployToDev` and `DeployToProd`.
 
 1. **DeployToDev**
@@ -251,6 +267,9 @@ It consists of two main jobs: `DeployToDev` and `DeployToProd`.
 - `Dependency`: It depends on the successful completion of the DeployToDev job (`needs: DeployToDev`).
 
 To run the pipeline:
+
 Push changes to your GitHub repository.
+
 Go to the `Actions` tab in your repository.
+
 Select the `test_flow` workflow and click the "Run workflow" button to trigger it manually.
