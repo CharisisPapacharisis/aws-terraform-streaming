@@ -44,7 +44,7 @@ sam init
 ```
 After selecting your template to use, runtime, and project name, you get a folder structure in your SAM project, similar to this:
 
-```
+```bash
 my-sam-app/
 ├── coinbase_api_call/
 │   ├── app.py              # Lambda function code
